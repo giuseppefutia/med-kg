@@ -1,3 +1,7 @@
+# Dataset
+explorer/hpo/hp.owl
+explorer/hpo/phenotype.hpoa
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
