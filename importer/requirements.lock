@@ -1,2 +1,4 @@
 neo4j==5.8.0
 tqdm==4.66.5
+pandas==2.2.3
+rdflib==7.1.1
