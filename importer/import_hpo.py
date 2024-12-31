@@ -65,7 +65,7 @@ class HPOImporter(BaseImporter):
         query = """
                 MATCH (n:Resource) 
                 WHERE n.uri STARTS WITH "http://purl.obolibrary.org/obo/HP" 
-                SET n:Hpo, 
+                SET n:HpoPhenotype, 
                     n.id = coalesce(n.id, replace(apoc.text.replace(n.uri,'(.*)obo/',''),'_', ':'));
                 """
         with self._driver.session(database=self.database) as session:
@@ -77,7 +77,7 @@ class HPOImporter(BaseImporter):
                 FIELDTERMINATOR '\t'
                 WITH row
                 SKIP 5 
-                MERGE (dis:Resource:Disease {id: row[0]}) 
+                MERGE (dis:Resource:HpoDisease {id: row[0]}) 
                 ON CREATE SET dis.label = row[1]; 
                 """
 
@@ -90,9 +90,9 @@ class HPOImporter(BaseImporter):
                 FIELDTERMINATOR '\t' 
                 WITH row
                 SKIP 5
-                MATCH (dis:Disease)
+                MATCH (dis:HpoDisease)
                 WHERE dis.id = row[0]
-                MATCH (phe:Hpo)
+                MATCH (phe:HpoPhenotype)
                 WHERE phe.id = row[3]
                 MERGE (dis)-[:HAS_PHENOTYPIC_FEATURE]->(phe) 
                 """
@@ -106,7 +106,7 @@ class HPOImporter(BaseImporter):
                 FIELDTERMINATOR '\t' 
                 WITH row 
                 SKIP 5 
-                MATCH (dis:Disease)-[rel:HAS_PHENOTYPIC_FEATURE]->(phe:Hpo) 
+                MATCH (dis:HpoDisease)-[rel:HAS_PHENOTYPIC_FEATURE]->(phe:HpoPhenotype) 
                 WHERE phe.id = row[3] and dis.id = row[0] 
                 FOREACH(ignoreMe IN CASE WHEN row[4] is not null THEN [1] ELSE [] END| 
                     SET rel.source = row[4]) 
@@ -129,26 +129,26 @@ class HPOImporter(BaseImporter):
 
     def enrich_with_descriptive_properties(self):
         query = """
-                MATCH (dis:Disease)-[rel:HAS_PHENOTYPIC_FEATURE]->(phe:Hpo) 
+                MATCH (dis:HpoDisease)-[rel:HAS_PHENOTYPIC_FEATURE]->(phe:HpoPhenotype) 
                 SET rel.aspect_name =  
                 CASE  
                     WHEN rel.aspect = 'P' THEN 'Phenotypic abnormality' 
                     WHEN rel.aspect = 'I' THEN 'Inheritance' 
                 END, 
-                rel.aspect_description = 
+                rel.aspectDescription = 
                 CASE 
                     WHEN rel.aspect = 'P'  
                     THEN 'Terms with the P aspect are located in the Phenotypic abnormality subontology' 
                     WHEN rel.aspect = 'I'  
                     THEN 'Terms with the I aspect are from the Inheritance subontology' 
                 END, 
-                rel.evidence_name =  
+                rel.evidenceName =  
                 CASE  
                     WHEN rel.evidence = 'IEA' THEN 'Inferred from electronic annotation' 
                     WHEN rel.evidence = 'PCS' THEN 'Published clinical study' 
                     WHEN rel.evidence = 'TAS' THEN 'Traceable author statement' 
                 END, 
-                rel.evidence_description = 
+                rel.evidenceDescription = 
                 CASE 
                     WHEN rel.evidence = 'IEA' THEN 'Annotations extracted by parsing the Clinical Features sections of the Online Mendelian Inheritance in Man resource are assigned the evidence code "IEA".' 
                     WHEN rel.evidence = 'PCS' THEN 'PCS is used for used for information extracted from articles in the medical literature. Generally, annotations of this type will include the pubmed id of the published study in the DB_Reference field.' 
@@ -158,7 +158,9 @@ class HPOImporter(BaseImporter):
                 CASE 
                     WHEN rel.source STARTS with 'PMID:' THEN 'https://pubmed.ncbi.nlm.nih.gov/' + apoc.text.replace(rel.source, '(.*)PMID:', '') 
                     WHEN rel.source STARTS with 'OMIM:' THEN 'https://omim.org/entry/' + apoc.text.replace(rel.source, '(.*)OMIM:', '') 
-                END 
+                END,
+                rel.createdBy = apoc.text.regexGroups(input, "HPO:(\\w+)\\[")[0][1],
+                rel.creationDate = apoc.text.regexGroups(input, "\\[(\\d{4}-\\d{2}-\\d{2})\\]")[0][1] AS extracted_date
                 """
 
         with self._driver.session(database=self.database) as session:
