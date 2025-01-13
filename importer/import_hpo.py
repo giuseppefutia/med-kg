@@ -17,10 +17,27 @@ class HPOImporter(BaseImporter):
         super().__init__(command=__file__, argv=argv)
         with self._driver.session() as session:
             session.run(f"CREATE DATABASE {self.database} IF NOT EXISTS")
+    
+    def clean_database(self):
+        # Useful to avoid duplicate data from neosemantics loading
+        query = """
+                CALL apoc.periodic.iterate(
+                    "MATCH (n:Resource) RETURN id(n) as id",
+                    "MATCH (n)
+                     WHERE id(n) = id
+                     DETACH DELETE n",
+                     {batchSize:10000})
+                YIELD batches, total return batches, total
+                """
+
+        with self._driver.session(database=self.database) as session:
+            session.run(query)
 
     def set_constraints(self):
         queries = ["CREATE CONSTRAINT n10s_unique_uri FOR (r:Resource) REQUIRE r.uri IS UNIQUE;",
-                   "CREATE CONSTRAINT IF NOT EXISTS FOR (n:Resource) REQUIRE (n.id) IS UNIQUE;"]
+                   "CREATE CONSTRAINT IF NOT EXISTS FOR (n:Resource) REQUIRE (n.id) IS UNIQUE;",
+                   "CREATE INDEX disease_id FOR (n:HpoDisease) ON (n.id);",
+                   "CREATE INDEX phenotype_id FOR (n:HpoPhenotype) ON (n.id);"]
         with self._driver.session(database=self.database) as session:
             for q in queries:
                 try:
@@ -122,6 +139,8 @@ class HPOImporter(BaseImporter):
                     SET rel.modifier = row[9]) 
                 FOREACH(ignoreMe IN CASE WHEN row[10] is not null THEN [1] ELSE [] END| 
                     SET rel.aspect = row[10])
+                FOREACH(ignoreMe IN CASE WHEN row[11] is not null THEN [1] ELSE [] END| 
+                    SET rel.biocuration = row[11])
                 """
 
         with self._driver.session(database=self.database) as session:
@@ -159,8 +178,8 @@ class HPOImporter(BaseImporter):
                     WHEN rel.source STARTS with 'PMID:' THEN 'https://pubmed.ncbi.nlm.nih.gov/' + apoc.text.replace(rel.source, '(.*)PMID:', '') 
                     WHEN rel.source STARTS with 'OMIM:' THEN 'https://omim.org/entry/' + apoc.text.replace(rel.source, '(.*)OMIM:', '') 
                 END,
-                rel.createdBy = apoc.text.regexGroups(input, "HPO:(\\w+)\\[")[0][1],
-                rel.creationDate = apoc.text.regexGroups(input, "\\[(\\d{4}-\\d{2}-\\d{2})\\]")[0][1] AS extracted_date
+                rel.createdBy = apoc.text.regexGroups(rel.biocuration, "HPO:(\\w+)\\[")[0][1],
+                rel.creationDate = apoc.text.regexGroups(rel.biocuration, "\\[(\\d{4}-\\d{2}-\\d{2})\\]")[0][1]
                 """
 
         with self._driver.session(database=self.database) as session:
@@ -172,9 +191,8 @@ class HPOImporter(BaseImporter):
                     "MATCH (n:Resource) RETURN id(n) as id",
                     "MATCH (n)
                      WHERE id(n) = id AND
-                           NOT (labels(n) = ['Resource', 'Hpo', 'Class'] OR
-                                labels(n) = ['Resource', 'Disease'] OR
-                                labels(n) = ['Resource', 'Ontology'])
+                           NOT 'HpoPhenotype' in labels(n) AND
+                           NOT 'HpoDisease' in labels(n)
                      DETACH DELETE n",
                      {batchSize:10000})
                 YIELD batches, total return batches, total
@@ -186,6 +204,8 @@ class HPOImporter(BaseImporter):
 
 if __name__ == '__main__':
     importing = HPOImporter(argv=sys.argv[1:])
+    logging.info('Cleaning database')
+    importing.clean_database()
     logging.info('Setting Constraints')
     importing.set_constraints()
     logging.info('Initializing Neosemantics')
@@ -195,7 +215,7 @@ if __name__ == '__main__':
     importing.load_HPO_OWL()
     logging.info('Loading HPO Entities')
     importing.label_HPO_entities()
-    logging.info('Creating Disease Entities')
+    logging.info('Creating HPO Disease Entities')
     importing.create_disease_entities()
     logging.info('Creating Phenotype Relationships')
     importing.create_rels_features_diseases()
