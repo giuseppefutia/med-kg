@@ -37,4 +37,4 @@ make import
 ```
 
 ## Graph-based Analysis
-In the `analyzer` folder, you will find notebooks to run graph-based analysis on the resulting biomedical knowledge graph.
+In the `analyzer` folder, you will find notebooks to run graph-based analysis and queries on the resulting biomedical knowledge graph.
